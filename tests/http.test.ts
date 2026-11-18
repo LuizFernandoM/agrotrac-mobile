@@ -7,8 +7,8 @@ import { database, snapshot } from './support';
 test('transport preserves supplied FormData, leaves boundary to fetch and supplies abort signal',async()=>{
   const form=new FormData();form.append('weighing','{}');form.append('romaneio',new Blob(['test'],{type:'image/png'}),'photo.png');
   let calls=0;
-  const request:typeof fetch=async(url,options)=>{calls++;assert.equal(url,'https://gateway.test/v1/audit/weighings/sync');assert.equal(options?.headers,undefined);assert.equal(options?.body,form);assert.deepEqual([...form.keys()],['weighing','romaneio']);assert.equal(options?.method,'POST');return new Response('{"sequence":"1"}',{status:201});};
-  assert.equal((await postMultipart('https://gateway.test/',form,1000,request)).status,201);assert.equal(calls,1);
+  const request:typeof fetch=async(url,options)=>{calls++;assert.equal(url,'https://gateway.test/v1/audit/weighings/sync');assert.deepEqual(options?.headers,{Authorization:'Bearer fixture-token'});assert.equal(options?.credentials,'omit');assert.equal(options?.redirect,'error');assert.ok(options?.signal);assert.equal(options?.body,form);assert.deepEqual([...form.keys()],['weighing','romaneio']);assert.equal(options?.method,'POST');return new Response('{"sequence":"1"}',{status:201});};
+  assert.equal((await postMultipart('https://gateway.test/',form,'fixture-token',1000,request)).status,201);assert.equal(calls,1);
   for(const bad of ['file:///secret','http://user:pass@host','https://host?a=1','https://host/#token'])assert.throws(()=>apiUrl(bad));
 });
 test('real host HTTP timeout and malformed success body keep SQLite pending; invalid permanent body still blocks',async()=>{
@@ -18,7 +18,7 @@ test('real host HTTP timeout and malformed success body keep SQLite pending; inv
   try{
     for(const route of ['/timeout','/invalid','/permanent']){
       const {repo,db}=database(),s=snapshot();try{await repo.initialize();await repo.insert(s);
-        const sync=new SyncCoordinator(repo,()=>postMultipart(`http://127.0.0.1:${address.port}${route}`,new FormData(),route==='/timeout'?80:2000));
+        const sync=new SyncCoordinator(repo,()=>postMultipart(`http://127.0.0.1:${address.port}${route}`,new FormData(),'fixture-token',route==='/timeout'?80:2000));
         await sync.trigger();const row=(await repo.list())[0];assert.equal(row.status,'PENDING');assert.equal(row.auto_retry_blocked,route==='/permanent'?1:0);assert.equal(row.last_error,route==='/permanent'?'HTTP_415':route==='/invalid'?'INVALID_CONFIRMATION':'NETWORK_TIMEOUT_OR_UPLOAD_ERROR');
       }finally{db.close();}
     }

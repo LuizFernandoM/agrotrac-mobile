@@ -2,7 +2,7 @@
 
 Aplicativo Expo React Native TypeScript para registrar pesagens offline com foto do romaneio e sincronização idempotente. O usuário aprovou manualmente no iPhone com Expo Go/tunnel: abertura, uso em modo avião, registro/listagem de pesagem offline e persistência dos registros após fechar completamente e reabrir o Expo Go. Sincronização real via Gateway, detalhes de câmera/foto e execução Android permanecem pendentes. Essas evidências manuais estão separadas dos testes automatizados em docs/validation.md.
 
-Leia [validação e roteiro do iPhone](docs/validation.md) e [desenho offline com revisão vinculante](docs/offline-design.md). Gateway ainda ausente e autenticação real pendente; o contrato direto com Audit é uma verificação técnica parcial.
+Leia [validação e roteiro do iPhone](docs/validation.md) e [desenho offline com revisão vinculante](docs/offline-design.md). A validação da autenticação com Gateway e Live reais está pendente. O contrato direto com Audit é uma verificação técnica parcial.
 
 ## Executar no iPhone com Expo Go
 
@@ -26,11 +26,11 @@ A URL base do produto aponta ao Gateway; pode ser definida em EXPO_PUBLIC_API_UR
     $env:EXPO_PUBLIC_API_URL = 'https://gateway-de-teste.exemplo.invalid'
     npx expo start --tunnel
 
-Troque pelo endpoint REAL autorizado e acessível pelo aparelho. Não coloque segredos em EXPO_PUBLIC_*. Endpoint montado: /v1/audit/weighings/sync.
+Use a URL autorizada do Gateway e informe usuário e senha na tela do app. O app envia login e logout para `/v1/live/auth/login` e `/v1/live/auth/logout`. Cada envio a `/v1/audit/weighings/sync` usa o cabeçalho `Authorization: Bearer`. O token fica em memória. Após reiniciar o app ou trocar a URL salva, entre novamente para sincronizar.
 
-**Tunnel Expo encaminha Metro/bundle, não a API.** localhost/127.0.0.1 no iPhone é o próprio iPhone; 10.0.2.2 só representa o host no emulador Android oficial. Audit permanece em bind 127.0.0.1 e Gateway não existe ainda, portanto sync final no iPhone depende de um caminho de API aprovado. Opções para discussão: Gateway HTTPS em ambiente de teste acessível ou encaminhamento HTTPS controlado da API isolada. Nada disso foi publicado/alterado automaticamente.
+**Tunnel Expo encaminha Metro/bundle.** O sync no iPhone depende de um Gateway HTTPS autorizado e alcançável pelo aparelho. No iPhone, localhost/127.0.0.1 corresponde ao próprio aparelho. No emulador Android oficial, 10.0.2.2 representa o host.
 
-Não há login mock, token inventado, OCR ou acesso móvel a PostgreSQL. HTTP 401/403 mostra falha de acesso/configuração e bloqueia novas tentativas automáticas. HTTPS válido é a opção indicada para iPhone.
+Expiração, HTTP 401 no sync e logout pausam os envios até um novo login. Pesagens e fotos permanecem no aparelho, e a captura offline segue disponível. Se o Gateway estiver indisponível no logout, a sessão local termina e o app indica que a revogação remota ficou sem confirmação.
 
 O plugin oficial expo-build-properties configura usesCleartextTraffic exclusivamente em builds próprios de desenvolvimento com AGROTRAC_DEV_CLEARTEXT=1 e NODE_ENV diferente de production; produção mantém false. O plugin NÃO modifica o binário Expo Go nem libera HTTP/ATS no iPhone. Não se deve esperar que app.config.ts altere permissões/políticas do host Expo Go.
 
@@ -41,7 +41,7 @@ O plugin oficial expo-build-properties configura usesCleartextTraffic exclusivam
 - Copia bytes para Paths.document/romaneios antes do INSERT. Não sobrescreve/apaga origem, destino ou órfãos. Confere SHA-256/tamanho da cópia. Snapshot canônico e foto são imutáveis por domínio/trigger SQLite; UUID v4 estável.
 - Repository usa migrations versionadas, WAL/FULL, constraints e transições condicionais; recupera IN_FLIGHT uma vez na inicialização. Lista mostra estado, erros, tentativas, bloqueio e prazo.
 - Single-flight FIFO, eventos NetInfo/AppState, botão manual e registro novo. Eventos durante upload são coalescidos; trava liberada em finally. Não inicia novos envios ao entrar em segundo plano; o upload já iniciado pode ser suspenso/falhar pelo sistema. Sem polling/sync oculto com app fechado.
-- Retry transitório preserva attempts/next_attempt_at com backoff 2 s até 60 s. Só tenta em novo evento/botão após o prazo; não instala timer periódico. Manual não é bloqueado por isInternetReachable=null. Erros 400/401/403/413/415 e conflitos 409 permanecem visíveis sem loop; snapshots não são editados nem recebem UUID novo para contornar rejeição.
+- Retry transitório preserva attempts/next_attempt_at com backoff de 2 s até 60 s. Retoma em novo evento/botão após o prazo. Erros 400/403/413/415 e conflitos 409 ficam visíveis sem repetição automática. O 401 devolve a pesagem à fila para retomar com a próxima sessão.
 - FormData contém exatamente weighing (string JSON) e romaneio (arquivo), boundary automático. 201/200 só marcam SYNCED se todos os campos canônicos e hash/tamanho/MIME coincidirem e sequence positiva/received_at UTC forem válidos. SYNCED nunca é reenviado.
 
 ## Verificação host e contrato parcial

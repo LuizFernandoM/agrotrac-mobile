@@ -5,8 +5,8 @@ import { Image } from 'react-native';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { photoLimits, type Photo, type Snapshot } from './domain';
 import { Repository } from './repository';
-import { postMultipart } from './http';
 import { imageDimensions } from './image';
+import type { MobileSession } from './session';
 export { apiUrl } from './http';
 
 export async function openRepository() {
@@ -36,16 +36,18 @@ export async function persistPhoto(asset: ImagePickerAsset, id: string): Promise
   if (saved.length !== bytes.length || await sha256(saved) !== hash) throw Error('Falha de integridade da cópia; arquivo preservado para suporte.');
   return Object.freeze({ uri: destination.uri, file_sha256: hash, file_size_bytes: saved.length, mime_type, width, height });
 }
-export function transport(base: () => string, timeoutMs = 30000) {
+export function transport(auth: MobileSession, foreground: () => boolean, timeoutMs = 30000) {
   return async (s: Snapshot) => {
+    const session = auth.current();
+    if (!session || !foreground()) return null;
     const file = new File(s.photo.uri);
     if (!file.exists || file.size !== s.photo.file_size_bytes) throw Error('PHOTO_INTEGRITY_ERROR');
     const bytes = await file.bytes();
     if (bytes.length !== s.photo.file_size_bytes || await sha256(bytes) !== s.photo.file_sha256) throw Error('PHOTO_INTEGRITY_ERROR');
     const form = new FormData();
     form.append('weighing', JSON.stringify(s.payload));
-    // React Native FormData file descriptor; boundary belongs to native fetch.
-    form.append('romaneio', { uri: s.photo.uri, type: s.photo.mime_type, name: `romaneio.${s.photo.mime_type === 'image/png' ? 'png' : 'jpg'}` } as unknown as Blob);
-    return postMultipart(base(), form, timeoutMs);
+    // Expo fetch consumes the File as a Blob and generates the multipart boundary.
+    form.append('romaneio', file);
+    return foreground() ? auth.upload(session, form, timeoutMs) : null;
   };
 }

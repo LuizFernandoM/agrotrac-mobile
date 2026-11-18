@@ -1,6 +1,6 @@
 import { backoff, confirmation, type Snapshot } from './domain';
 import type { Repository } from './repository';
-export type Transport = (snapshot: Snapshot) => Promise<{ status: number; body: unknown }>;
+export type Transport = (snapshot: Snapshot) => Promise<{ status: number; body: unknown } | null>;
 export class SyncCoordinator {
   private active?: Promise<void>;
   private requested = false;
@@ -15,15 +15,20 @@ export class SyncCoordinator {
       this.requested = false;
       let row;
       while (this.foreground() && (row = await this.repo.next(this.now()))) {
+        if (!this.foreground()) break;
         const id = row.payload.local_id;
         if (!await this.repo.claim(id)) continue;
         this.changed();
         try {
           const result = await this.send(row);
+          if (!result || result.status === 401) {
+            await this.repo.release(id);
+            break;
+          }
           if (result.status === 200 || result.status === 201) await this.repo.success(id, confirmation(row, result.body));
           else {
-            const blocked = [400,401,403,409,413,415].includes(result.status);
-            await this.repo.failure(id, [401,403].includes(result.status) ? 'Falha de acesso/configuração. Procure suporte.' : `HTTP_${result.status}`, blocked, this.now() + backoff(row.attempts + 1), result.status === 409);
+            const blocked = [400,403,409,413,415].includes(result.status);
+            await this.repo.failure(id, `HTTP_${result.status}`, blocked, this.now() + backoff(row.attempts + 1), result.status === 409);
           }
         } catch (e) {
           const code = e instanceof Error && ['INVALID_CONFIRMATION','PHOTO_INTEGRITY_ERROR'].includes(e.message) ? e.message : 'NETWORK_TIMEOUT_OR_UPLOAD_ERROR';

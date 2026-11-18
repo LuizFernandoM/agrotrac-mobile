@@ -32,8 +32,8 @@ test('network, timeout, malformed body and divergent acknowledgement never synce
     } finally {db.close();}
   });
 });
-test('409 conflict and permanent 400/413/415/auth never automatically loop on subsequent events',async t => {
-  for (const status of [400,401,403,409,413,415]) await t.test(String(status), async()=> {
+test('409 conflict and permanent 400/403/413/415 never automatically loop on subsequent events',async t => {
+  for (const status of [400,403,409,413,415]) await t.test(String(status), async()=> {
     const {repo,db}=database(),s=snapshot(); let calls=0,now=1;
     try { await repo.initialize();await repo.insert(s);const sync=new SyncCoordinator(repo,async()=>{calls++;return {status,body:null};},()=>{},()=>now);
       await sync.trigger();now=1e10;await sync.trigger();const r=(await repo.list())[0];assert.equal(r.status,status===409?'FAILED_CONFLICT':'PENDING');assert.equal(r.auto_retry_blocked,1);assert.equal(calls,1);assert.deepEqual(r.payload,s.payload);

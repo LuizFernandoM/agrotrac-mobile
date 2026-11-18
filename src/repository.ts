@@ -26,7 +26,10 @@ CREATE TRIGGER immutable_snapshot BEFORE UPDATE OF local_id,payload,photo,gross,
 CREATE TRIGGER valid_transition BEFORE UPDATE OF status ON weighings WHEN NOT (
  (OLD.status='PENDING' AND NEW.status='IN_FLIGHT') OR
  (OLD.status='IN_FLIGHT' AND NEW.status IN ('PENDING','SYNCED','FAILED_CONFLICT')) OR OLD.status=NEW.status)
- BEGIN SELECT RAISE(ABORT,'invalid transition'); END;`
+ BEGIN SELECT RAISE(ABORT,'invalid transition'); END;`,
+`UPDATE weighings SET auto_retry_blocked=0,next_attempt_at=0,last_error=NULL
+ WHERE status='PENDING' AND auto_retry_blocked=1
+ AND last_error='Falha de acesso/configuração. Procure suporte.';`
 ];
 type DbRow = Omit<Row, 'payload' | 'photo'> & { payload: string; photo: string };
 export class Repository {
@@ -54,6 +57,7 @@ export class Repository {
   async next(now: number): Promise<Row | undefined> { return (await this.list()).find(r => r.status === 'PENDING' && !r.auto_retry_blocked && r.next_attempt_at <= now); }
   async claim(id: string) { return (await this.db.runAsync("UPDATE weighings SET status='IN_FLIGHT',attempts=attempts+1 WHERE local_id=? AND status='PENDING' AND auto_retry_blocked=0", id)).changes === 1; }
   async success(id: string, c: { sequence: string; received_at: string }) { await this.db.runAsync("UPDATE weighings SET status='SYNCED',sequence=?,received_at=?,last_error=NULL WHERE local_id=? AND status='IN_FLIGHT'", c.sequence, c.received_at, id); }
+  async release(id: string) { await this.db.runAsync("UPDATE weighings SET status='PENDING',attempts=attempts-1 WHERE local_id=? AND status='IN_FLIGHT'", id); }
   async failure(id: string, error: string, blocked: boolean, next: number, conflict = false) { await this.db.runAsync("UPDATE weighings SET status=?,last_error=?,auto_retry_blocked=?,next_attempt_at=? WHERE local_id=? AND status='IN_FLIGHT'", conflict ? 'FAILED_CONFLICT' : 'PENDING', error, blocked ? 1 : 0, next, id); }
   async setting(key: string) { return (await this.db.getAllAsync<{ value: string }>('SELECT value FROM settings WHERE key=?', key))[0]?.value; }
   async setSetting(key: string, value: string) { await this.db.runAsync('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, value); }
