@@ -1,56 +1,69 @@
-# AgroTrac Mobile — Aplicativo de Campo (Offline-First)
+# AgroTrac Mobile
 
-Aplicativo móvel para operadores de balança e motoristas do sistema **AgroTrac**, em estrita conformidade com a especificação original (`acac36b6`) e a **Opção 1 aprovada** (pesagem offline + anexo direto de romaneio).
+Aplicativo Expo React Native TypeScript para registrar pesagens offline com foto do romaneio e sincronização idempotente. O usuário aprovou manualmente no iPhone com Expo Go/tunnel: abertura, uso em modo avião, registro/listagem de pesagem offline e persistência dos registros após fechar completamente e reabrir o Expo Go. Sincronização real via Gateway, detalhes de câmera/foto e execução Android permanecem pendentes. Essas evidências manuais estão separadas dos testes automatizados em docs/validation.md.
 
----
+Leia [validação e roteiro do iPhone](docs/validation.md) e [desenho offline com revisão vinculante](docs/offline-design.md). Gateway ainda ausente e autenticação real pendente; o contrato direto com Audit é uma verificação técnica parcial.
 
-## 1. Responsabilidades
+## Executar no iPhone com Expo Go
 
-- **Operação de Campo Offline-First**: Permite que o operador de balança registre o peso da carga do caminhão mesmo em locais remotos sem cobertura de internet.
-- **Acesso a Recurso Nativo**: Captura ou anexo de fotos do romaneio de carga em papel utilizando a câmera/galeria via `expo-image-picker`.
-- **Persistência Local Persistente**: Salva os dados estruturados da pesagem em banco SQLite local e mantém o arquivo de imagem salvo no sistema de arquivos do aparelho.
-- **Sincronização Idempotente**: Ao restabelecer sinal de rede, executa automaticamente rotina de envio das pesagens pendentes via `multipart/form-data` para a API Gateway / Audit C.
-- **Prevenção de Duplicatas**: Utiliza chave única (`local_id` UUID) gerada no momento da pesagem para garantir que reenvios ou instabilidades de conexão nunca dupliquem registros no servidor.
+No PowerShell, dentro desta pasta:
 
----
+    npm ci
+    npx expo install --check
+    npm run typecheck
+    npx expo start --tunnel
 
-## 2. Ferramentas e Tecnologias
+Com o iPhone online, leia o QR pela câmera e abra no Expo Go instalado. Carregue o formulário antes de ativar modo avião. Não foi iniciado túnel nesta entrega. Se o host solicitar conta, faça login interativamente na mesma conta no CLI e no Expo Go.
 
-- **Plataforma Mobile**: React Native com Expo e TypeScript.
-- **Banco Local Offline**: SQLite (`expo-sqlite`).
-- **Recurso Nativo (Foto)**: `expo-image-picker` e `expo-file-system`.
-- **Detecção de Conectividade**: `@react-native-community/netinfo`.
-- **Cliente HTTP**: Axios ou Fetch API para envio `multipart/form-data`.
+O projeto usa SDK 58. O portal oficial Expo Go e as notas oficiais da App Store apresentam suporte ao SDK 58 (Expo Go 58.0.5); a versão já instalada no seu iPhone ainda precisa ser conferida. Se houver erro de SDK incompatível, registre a mensagem e alinhe a versão pelas opções oficiais; não faça downgrade silencioso nem apague os dados do projeto. Não há dependência nativa customizada exigindo dev build: SQLite, FileSystem, ImagePicker, Crypto e NetInfo constam como incluídos no Expo Go para iOS/Android nas fontes oficiais.
 
----
+É possível testar formulário, câmera, galeria, modo avião e persistência sem API. O modo avião não garante que o próprio host Expo Go conseguirá reabrir o bundle após ser encerrado: se isso acontecer, recarregue online o mesmo projeto sem apagar dados e verifique SQLite/foto separadamente. O checklist completo está em docs/validation.md.
 
-## 3. Arquitetura de Pastas
+## Configurar a API
 
-```text
-agrotrac-mobile/
-├── src/
-│   ├── screens/                 # Telas do aplicativo
-│   │   ├── WeighingScreen.tsx   # Formulário de pesagem (placa, peso, motorista)
-│   │   ├── CameraScreen.tsx     # Captura / anexo da foto do romaneio
-│   │   └── SyncStatusScreen.tsx # Fila de sincronização e status local
-│   ├── database/                # Persistência local SQLite
-│   │   ├── db.ts                # Conexão e inicialização do SQLite
-│   │   └── weighingRepository.ts # CRUD local (salvar, listar pendentes, marcar sincronizado)
-│   ├── services/                # Serviços de rede
-│   │   ├── api.ts               # Cliente HTTP
-│   │   └── syncService.ts       # Rotina de detecção de conexão e upload multipart
-│   ├── types/                   # Tipos de dados (Weighing, SyncStatus)
-│   └── App.tsx                  # Ponto de entrada do aplicativo
-├── app.json
-├── package.json
-└── tsconfig.json
-```
+A URL base do produto aponta ao Gateway; pode ser definida em EXPO_PUBLIC_API_URL antes de iniciar Metro ou salva em “Conexão ao Gateway” no app. O setting persistido prevalece sobre a variável pública. Sem URL, gravação offline continua disponível.
 
----
+    $env:EXPO_PUBLIC_API_URL = 'https://gateway-de-teste.exemplo.invalid'
+    npx expo start --tunnel
 
-## 4. Conexões e Integrações
+Troque pelo endpoint REAL autorizado e acessível pelo aparelho. Não coloque segredos em EXPO_PUBLIC_*. Endpoint montado: /v1/audit/weighings/sync.
 
-- **Sem Internet**: Funciona de forma totalmente autônoma, gravando pesagens no banco local SQLite com status `PENDING`.
-- **Com Internet**: Dispara envio HTTP para o **API Gateway**:
-  - `POST /v1/audit/weighings/sync`: Envio `multipart/form-data` contendo o payload da pesagem (`local_id`, `placa`, `peso_bruto_kg`, `tara_kg`, `peso_liquido_kg`) junto com o arquivo de imagem do romaneio.
-  - Ao receber confirmação do servidor (`201 Created` ou `200 OK`), atualiza o status local para `SYNCED`.
+**Tunnel Expo encaminha Metro/bundle, não a API.** localhost/127.0.0.1 no iPhone é o próprio iPhone; 10.0.2.2 só representa o host no emulador Android oficial. Audit permanece em bind 127.0.0.1 e Gateway não existe ainda, portanto sync final no iPhone depende de um caminho de API aprovado. Opções para discussão: Gateway HTTPS em ambiente de teste acessível ou encaminhamento HTTPS controlado da API isolada. Nada disso foi publicado/alterado automaticamente.
+
+Não há login mock, token inventado, OCR ou acesso móvel a PostgreSQL. HTTP 401/403 mostra falha de acesso/configuração e bloqueia novas tentativas automáticas. HTTPS válido é a opção indicada para iPhone.
+
+O plugin oficial expo-build-properties configura usesCleartextTraffic exclusivamente em builds próprios de desenvolvimento com AGROTRAC_DEV_CLEARTEXT=1 e NODE_ENV diferente de production; produção mantém false. O plugin NÃO modifica o binário Expo Go nem libera HTTP/ATS no iPhone. Não se deve esperar que app.config.ts altere permissões/políticas do host Expo Go.
+
+## Persistência e sync
+
+- Formulário: placa, bruto/tara em kg inteiros seguros, líquido calculado, agendamento UUID/motorista/documento/observações opcionais, captured_at UTC do momento de salvar.
+- Câmera e galeria via expo-image-picker; cancelamento/permissão negada preservam formulário. JPEG/PNG reais: assinatura/estrutura (CRC PNG), dimensões do arquivo e leitura de dimensões nativa, até 10 MiB, 8192 por dimensão e 16.777.216 pixels. Outros formatos são rejeitados; não há transformação disfarçada por extensão.
+- Copia bytes para Paths.document/romaneios antes do INSERT. Não sobrescreve/apaga origem, destino ou órfãos. Confere SHA-256/tamanho da cópia. Snapshot canônico e foto são imutáveis por domínio/trigger SQLite; UUID v4 estável.
+- Repository usa migrations versionadas, WAL/FULL, constraints e transições condicionais; recupera IN_FLIGHT uma vez na inicialização. Lista mostra estado, erros, tentativas, bloqueio e prazo.
+- Single-flight FIFO, eventos NetInfo/AppState, botão manual e registro novo. Eventos durante upload são coalescidos; trava liberada em finally. Não inicia novos envios ao entrar em segundo plano; o upload já iniciado pode ser suspenso/falhar pelo sistema. Sem polling/sync oculto com app fechado.
+- Retry transitório preserva attempts/next_attempt_at com backoff 2 s até 60 s. Só tenta em novo evento/botão após o prazo; não instala timer periódico. Manual não é bloqueado por isInternetReachable=null. Erros 400/401/403/413/415 e conflitos 409 permanecem visíveis sem loop; snapshots não são editados nem recebem UUID novo para contornar rejeição.
+- FormData contém exatamente weighing (string JSON) e romaneio (arquivo), boundary automático. 201/200 só marcam SYNCED se todos os campos canônicos e hash/tamanho/MIME coincidirem e sequence positiva/received_at UTC forem válidos. SYNCED nunca é reenviado.
+
+## Verificação host e contrato parcial
+
+Revisão independente Copilot somente leitura não encontrou bloqueadores para o primeiro ensaio offline no iPhone, condicionado à compatibilidade SDK 58 no aparelho; APIs locais File/Crypto/Image.getSize foram conferidas. A hipótese condicional de que uma foto de 10 MiB seria rejeitada por overhead multipart foi **refutada no Audit real**: JPEG válido de 10.485.760 bytes, corpo de 10.486.261 bytes, retornou 201 e replay 200 com uma única linha SQL e hash/foto iguais; JPEG válido de 10.485.761 bytes retornou 413 sem linha SQL. O limite padrão é por arquivo, não pelo corpo multipart total; não houve mudança de limite Mobile/backend. Evidência e ressalvas em docs/validation.md; iPhone e API física continuam pendentes.
+
+    npm test
+    npm run typecheck
+    npx expo install --check
+    npx expo-doctor
+    npm run export:android
+    npm run export:ios
+    npm run test:contract
+
+26 testes host aprovados, SQLite REAL em arquivo/reabertura com mesmas queries/migrations, HTTP timeout/JSON inválido, falhas permanentes, concorrência e confirmação perdida. Expo doctor 20/20 e bundles Android/iOS gerados no Windows. Isso NÃO comprova câmera, ponte expo-sqlite, arquivos ou FormData nativos no aparelho.
+
+test:contract é opt-in (MOBILE_AUDIT_CONTRACT=1), importa Audit real e cria schema PostgreSQL/storage exclusivos; credenciais entram apenas pelo ambiente/arquivo opt-in do Audit. Validou 201/200/409, resposta perdida após commit e replay 200, usando o mesmo domínio de confirmação. Comandos de relay15432 e evidências estão em docs/validation.md. Relay iniciado foi parado/preservado, servidores/pool de teste fechados; fixtures e schemas preservados. Não executar a suíte Core inteira para este contrato.
+
+## Versões resolvidas e fontes
+
+Node preservado 22.14.0, npm 10.9.2. Instalados: Expo 58.0.25; React Native 0.88.1; React 19.3.0; expo-sqlite 58.0.17; expo-file-system 58.0.13; expo-image-picker 58.0.10; expo-crypto 58.0.8; NetInfo 12.0.1; expo-build-properties 58.0.12; TypeScript 6.0.3; tsx 4.23.15; @types/react 19.3.0; @types/node 22.20.5. Lockfile fixa a resolução real. Expo SDK 58 exige Node mínimo 22.13.x; nenhum runtime global foi alterado.
+
+Fontes oficiais consultadas em 16/11/2026: [compatibilidade Expo](https://docs.expo.dev/versions/latest/), [SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/), [FileSystem moderno](https://docs.expo.dev/versions/latest/sdk/filesystem/), [ImagePicker](https://docs.expo.dev/versions/latest/sdk/imagepicker/), [Crypto](https://docs.expo.dev/versions/latest/sdk/crypto/), [NetInfo](https://docs.expo.dev/versions/latest/sdk/netinfo/), [BuildProperties](https://docs.expo.dev/versions/latest/sdk/build-properties/), [Expo Go](https://expo.dev/go), [App Store](https://apps.apple.com/us/app/expo-go/id982107779). APIs e evidências detalhadas em docs/validation.md.
+
+npm audit reporta três achados moderados na cadeia de ferramentas Expo/fingerprint/minimatch, sem altos/críticos; o downgrade incompatível sugerido por audit fix --force não foi aplicado.

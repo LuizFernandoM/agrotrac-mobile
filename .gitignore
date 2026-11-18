@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+dist/
+dist-ios/
+exports/
+.env
+android/
+ios/
+/tests/fixtures/
+/.env.*
+!/.env.example
+*.log
